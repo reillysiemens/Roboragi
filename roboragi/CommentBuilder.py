@@ -21,14 +21,20 @@ Takes the data given to it by search and formats it into a comment
 import datetime
 import re
 import traceback
-from os import linesep
+from urllib.parse import urljoin
 
 import DatabaseHandler
 
+ANI_BASE = 'http://anilist.co/'
+MAL_BASE = 'http://myanimelist.net/'
 
-# Removes the (Source: MAL) or (Written by X) bits from the decriptions in the databases
+
 def cleanupDescription(desc):
-    for match in re.finditer("([\[\<\(](.*?)[\]\>\)])", desc, re.S):
+    """
+    Removes the (Source: MAL) or (Written by X) bits from the decriptions in
+    the databases
+    """
+    for match in re.finditer(r"([\[\<\(](.*?)[\]\>\)])", desc, re.S):
         if 'ource' in match.group(1).lower():
             desc = desc.replace(match.group(1), '')
         if 'MAL' in match.group(1):
@@ -38,7 +44,7 @@ def cleanupDescription(desc):
         if 'taken from' in match.group(1):
             desc = desc.replace(match.group(1), '')
 
-    for match in re.finditer("([\<](.*?)[\>])", desc, re.S):
+    for match in re.finditer(r"([\<](.*?)[\>])", desc, re.S):
         if 'br' in match.group(1).lower():
             desc = desc.replace(match.group(1), '')
         if 'i' == match.group(1).lower():
@@ -46,16 +52,13 @@ def cleanupDescription(desc):
         if 'b' == match.group(1).lower():
             desc = desc.replace(match.group(1), '')
 
-    reply = ''
-    for i, line in enumerate(linesep.join([s for s in desc.splitlines() if s]).splitlines()):
-        if i is not 0:
-            reply += '\n'
-        reply += '>' + line + '\n'
-    return reply
+    return '\n\n'.join(f">{l}" for l in desc.splitlines() if l)
 
 
-# Builds an anime comment from the various data sources
 def buildAnimeComment(isExpanded, ani, ap, kit):
+    """
+    Builds an anime comment from the various data sources
+    """
     try:
         comment = ''
 
@@ -80,25 +83,27 @@ def buildAnimeComment(isExpanded, ani, ap, kit):
         release_year = None
 
         if ani:
-            aniURL = 'http://anilist.co/anime/' + str(ani['id'])
-            malURL = 'http://myanimelist.net/anime/' + str(ani['id_mal']) if ani['id_mal'] else None
+            ani_id = ani['id']
+            id_mal = ani['id_mal']
+            aniURL = urljoin(ANI_BASE, f"/anime/{ani_id}")
+            malURL = urljoin(MAL_BASE, f"/anime/{id_mal}") if id_mal else None
 
-            title = ani['title_romaji'] if 'title_romaji' in ani else ani['title_english']
-            desc = ani['description'] if 'description' in ani else None
-            status = ani['airing_status'].title() if 'airing_status' in ani else None
-            cType = ani['type'] if 'type' in ani else None
+            title = ani.get('title_romaji', ani['title_english'])
+            desc = ani.get('description')
+            status = str.title(ani.get('airing_status', '')) or None
+            cType = ani.get('type')
 
-            jTitle = ani['title_japanese'] if 'title_japanese' in ani else None
-            genres = ani['genres'] if 'genres' in ani else None
+            jTitle = ani.get('title_japanese')
+            genres = ani.get('genres')
 
             try:
-                year_str = str(ani['start_date_fuzzy']) if 'start_date_fuzzy' in ani else None
+                year_str = str(ani.get('start_date_fuzzy'))
                 if year_str:
                     release_year = year_str[:4]
-            except:
+            except Exception:
                 pass
 
-            episodes = ani['total_episodes'] if 'total_episodes' in ani else None
+            episodes = ani.get('total_episodes')
             if episodes == 0:
                 episodes = None
 
@@ -110,21 +115,21 @@ def buildAnimeComment(isExpanded, ani, ap, kit):
             kitURL = kit['url']
 
             if not title:
-                title = kit['title_romaji'] if kit['title_romaji'] else kit['title_english']
+                title = kit.get('title_romaji', kit['title_english'])
             if not desc:
-                desc = kit['description'] if 'description' in kit else None
+                desc = kit.get('description')
             if not cType:
-                cType = kit['type'].title() if 'type' in kit else None
+                cType = str.title(kit.get('type', '')) or None
 
             try:
-                year_str = str(kit['startDate']) if 'startDate' in kit else None
+                year_str = str(kit.get('startDate', '')) or None
                 if year_str:
                     release_year = year_str[:4]
-            except:
+            except Exception:
                 pass
 
             if not episodes:
-                episodes = kit['episode_count'] if 'episode_count' in kit else None
+                episodes = kit.get('episode_count')
                 if episodes == 0:
                     episodes = None
 
@@ -139,13 +144,13 @@ def buildAnimeComment(isExpanded, ani, ap, kit):
         urlComments = []
 
         if ani is not None:
-            urlComments.append('[AL](' + sanitise_url_for_markdown(aniURL) + ')')
+            urlComments.append(f"[AL]({sanitise_url_for_markdown(aniURL)})")
         if apURL is not None:
-            urlComments.append('[A-P](' + sanitise_url_for_markdown(apURL) + ')')
+            urlComments.append(f"[A-P]({sanitise_url_for_markdown(apURL)})")
         if kit is not None:
-            urlComments.append('[KIT](' + sanitise_url_for_markdown(kitURL) + ')')
+            urlComments.append(f"[KIT]({sanitise_url_for_markdown(kitURL)})")
         if malURL:
-            urlComments.append('[MAL](' + sanitise_url_for_markdown(malURL) + ')')
+            urlComments.append(f"[MAL]({sanitise_url_for_markdown(malURL)})")
 
         for i, link in enumerate(urlComments):
             if i is not 0:
@@ -212,8 +217,8 @@ def buildAnimeComment(isExpanded, ani, ap, kit):
 
         # ----- EPISODE COUNTDOWN -----#
         if (countdown is not None) and (nextEpisode is not None):
-            current_utc_time = datetime.datetime.utcnow()
-            air_time_in_utc = current_utc_time + datetime.timedelta(0, countdown)
+            now = datetime.datetime.utcnow()
+            air_time_in_utc = now + datetime.timedelta(0, countdown)
             formatted_time = air_time_in_utc.strftime('%Y%m%dT%H%M')
 
             # countdown is given to us in seconds
@@ -241,19 +246,23 @@ def buildAnimeComment(isExpanded, ani, ap, kit):
             receipt += 'KIT '
         print(receipt)
 
-        # We return the title/comment separately so we can track if multiples of the same comment have been requests (e.g. {Nisekoi}{Nisekoi}{Nisekoi})
+        # We return the title/comment separately so we can track if multiples
+        # of the same comment have been requests
+        # (e.g. {Nisekoi}{Nisekoi}{Nisekoi})
         dictToReturn = {}
         dictToReturn['title'] = title
         dictToReturn['comment'] = comment
 
         return dictToReturn
-    except:
+    except Exception:
         traceback.print_exc()
         return None
 
 
-# Builds a manga comment from MAL/Anilist/MangaUpdates data
 def buildMangaComment(isExpanded, ani, mu, ap, kit):
+    """
+    Builds a manga comment from MAL/Anilist/MangaUpdates data
+    """
     try:
         comment = ''
 
@@ -276,21 +285,23 @@ def buildMangaComment(isExpanded, ani, mu, ap, kit):
         desc = None
 
         if ani:
-            aniURL = 'http://anilist.co/manga/' + str(ani['id'])
-            malURL = 'http://myanimelist.net/manga/' + str(ani['id_mal']) if ani['id_mal'] else None
+            ani_id = ani['id']
+            id_mal = ani['id_mal']
+            aniURL = urljoin(ANI_BASE, f"/manga/{ani_id}")
+            malURL = urljoin(MAL_BASE, f"/manga/{id_mal}") if id_mal else None
 
-            title = ani['title_romaji'] if 'title_romaji' in ani else ani['title_english']
-            desc = ani['description'] if 'description' in ani else None
-            status = ani['publishing_status'].title() if 'publishing_status' in ani else None
-            cType = ani['type'] if 'type' in ani else None
+            title = ani.get('title_romaji', ani['title_english'])
+            desc = ani.get('description')
+            status = str.title(ani.get('publishing_status', '')) or None
+            cType = ani.get('type')
 
-            jTitle = ani['title_japanese'] if 'title_japanese' in ani else None
-            genres = ani['genres'] if 'genres' in ani else None
+            jTitle = ani.get('title_japanese')
+            genres = ani.get('genres')
 
-            chapters = ani['total_chapters'] if 'total_chapters' in ani else None
+            chapters = ani.get('total_chapters')
             if chapters == 0:
                 chapters = None
-            volumes = ani['total_volumes'] if 'total_volumes' in ani else None
+            volumes = ani.get('total_volumes')
             if volumes == 0:
                 volumes = None
 
@@ -298,18 +309,18 @@ def buildMangaComment(isExpanded, ani, mu, ap, kit):
             kitURL = kit['url']
 
             if not title:
-                title = kit['title_romaji'] if kit['title_romaji'] else kit['title_english']
+                title = kit.get('title_romaji', kit['title_english'])
             if not desc:
-                desc = kit['description'] if 'description' in kit else None
+                desc = kit.get('description')
             if not cType:
-                cType = kit['type'].title() if 'type' in kit else None
+                cType = str.title(kit.get('type', '')) or None
 
             if not chapters:
-                chapters = kit['chapter_count'] if 'chapter_count' in kit else None
+                chapters = kit.get('chapter_count')
                 if chapters == 0:
                     chapters = None
             if not volumes:
-                volumes = kit['volume_count'] if 'volume_count' in kit else None
+                volumes = kit.get('volume_count')
                 if volumes == 0:
                     volumes = None
 
@@ -324,15 +335,15 @@ def buildMangaComment(isExpanded, ani, mu, ap, kit):
         urlComments = []
 
         if aniURL is not None:
-            urlComments.append('[AL](' + sanitise_url_for_markdown(aniURL) + ')')
+            urlComments.append(f"[AL]({sanitise_url_for_markdown(aniURL)})")
         if apURL is not None:
-            urlComments.append('[A-P](' + sanitise_url_for_markdown(apURL) + ')')
+            urlComments.append(f"[A-P]({sanitise_url_for_markdown(apURL)})")
         if kitURL is not None:
-            urlComments.append('[KIT](' + sanitise_url_for_markdown(kitURL) + ')')
+            urlComments.append(f"[KIT]({sanitise_url_for_markdown(kitURL)})")
         if muURL is not None:
-            urlComments.append('[MU](' + sanitise_url_for_markdown(muURL) + ')')
+            urlComments.append(f"[MU]({sanitise_url_for_markdown(muURL)})")
         if malURL:
-            urlComments.append('[MAL](' + sanitise_url_for_markdown(malURL) + ')')
+            urlComments.append(f"[MAL]({sanitise_url_for_markdown(malURL)})")
 
         for i, link in enumerate(urlComments):
             if i is not 0:
@@ -436,13 +447,14 @@ def buildMangaComment(isExpanded, ani, mu, ap, kit):
         dictToReturn['comment'] = comment
 
         return dictToReturn
-    except:
-        # traceback.print_exc()
+    except Exception:
         return None
 
 
-# Builds a manga comment from MAL/Anilist/MangaUpdates data
 def buildLightNovelComment(isExpanded, ani, nu, lndb, kit):
+    """
+    Builds a manga comment from MAL/Anilist/MangaUpdates data
+    """
     try:
         comment = ''
 
@@ -465,22 +477,23 @@ def buildLightNovelComment(isExpanded, ani, nu, lndb, kit):
         desc = None
 
         if ani:
-            aniURL = 'http://anilist.co/manga/' + str(ani['id'])
-            malURL = 'http://myanimelist.net/manga/' + str(ani['id_mal']) if ani['id_mal'] else None
+            ani_id = ani['id']
+            id_mal = ani['id_mal']
+            aniURL = urljoin(ANI_BASE, f"/manga/{ani_id}")
+            malURL = urljoin(MAL_BASE, f"/manga/{id_mal}") if id_mal else None
 
-            title = ani['title_romaji'] if 'title_romaji' in ani else ani['title_english']
-            desc = ani['description'] if 'description' in ani else None
-            status = ani['publishing_status'].title() if 'publishing_status' in ani and ani[
-                'publishing_status'] else None
-            cType = ani['type'] if 'type' in ani else None
+            title = ani.get('title_romaji', ani['title_english'])
+            desc = ani.get('description')
+            status = str.title(ani.get('publishing_status', '')) or None
+            cType = ani.get('type')
 
-            jTitle = ani['title_japanese'] if 'title_japanese' in ani else None
-            genres = ani['genres'] if 'genres' in ani else None
+            jTitle = ani.get('title_japanese')
+            genres = ani.get('genres')
 
-            chapters = ani['total_chapters'] if 'total_chapters' in ani else None
+            chapters = ani.get('total_chapters')
             if chapters == 0:
                 chapters = None
-            volumes = ani['total_volumes'] if 'total_volumes' in ani else None
+            volumes = ani.get('total_volumes')
             if volumes == 0:
                 volumes = None
 
@@ -488,18 +501,18 @@ def buildLightNovelComment(isExpanded, ani, nu, lndb, kit):
             kitURL = kit['url']
 
             if not title:
-                title = kit['title_romaji'] if kit['title_romaji'] else kit['title_english']
+                title = kit.get('title_romaji', kit['title_english'])
             if not desc:
-                desc = kit['description'] if 'description' in kit else None
+                desc = kit.get('description')
             if not cType:
-                cType = kit['type'].title() if 'type' in kit else None
+                cType = str.title(kit.get('type', '')) or None
 
             if not chapters:
-                chapters = kit['chapter_count'] if 'chapter_count' in kit else None
+                chapters = kit.get('chapter_count')
                 if chapters == 0:
                     chapters = None
             if not volumes:
-                volumes = kit['volume_count'] if 'volume_count' in kit else None
+                volumes = kit.get('volume_count')
                 if volumes == 0:
                     volumes = None
 
@@ -514,15 +527,15 @@ def buildLightNovelComment(isExpanded, ani, nu, lndb, kit):
         urlComments = []
 
         if aniURL is not None:
-            urlComments.append('[AL](' + sanitise_url_for_markdown(aniURL) + ')')
+            urlComments.append(f"[AL]({sanitise_url_for_markdown(aniURL)})")
         if kitURL is not None:
-            urlComments.append('[KIT](' + sanitise_url_for_markdown(kitURL) + ')')
+            urlComments.append(f"[KIT]({sanitise_url_for_markdown(kitURL)})")
         if nuURL is not None:
-            urlComments.append('[NU](' + sanitise_url_for_markdown(nuURL) + ')')
+            urlComments.append(f"[NU]({sanitise_url_for_markdown(nuURL)})")
         if lndbURL is not None:
-            urlComments.append('[LNDB](' + sanitise_url_for_markdown(lndbURL) + ')')
+            urlComments.append(f"[LNDB]({sanitise_url_for_markdown(lndbURL)})")
         if malURL:
-            urlComments.append('[MAL](' + sanitise_url_for_markdown(malURL) + ')')
+            urlComments.append(f"[MAL]({sanitise_url_for_markdown(malURL)})")
 
         for i, link in enumerate(urlComments):
             if i is not 0:
@@ -626,17 +639,19 @@ def buildLightNovelComment(isExpanded, ani, nu, lndb, kit):
         dictToReturn['comment'] = comment
 
         return dictToReturn
-    except:
+    except Exception:
         traceback.print_exc()
         return None
 
 
 def sanitise_url_for_markdown(url):
-    return url.replace('(', '\(').replace(')', '\)')
+    return url.replace('(', r'\(').replace(')', r'\)')
 
 
-# Builds a stats comment
 def buildStatsComment(subreddit=None, username=None):
+    """
+    Builds a stats comment
+    """
     try:
         statComment = ''
         receipt = '(S) Request successful: Stats'
@@ -700,7 +715,8 @@ def buildStatsComment(subreddit=None, username=None):
                     statComment += str(i + 1) + '. /u/' + str(requester[0]) + ' (' + str(requester[1]) + ' requests)\n'
 
             else:
-                statComment += 'There have been no requests on /r/' + str(subreddit) + ' yet.'
+                statComment += ('There have been no requests on /r/{subreddit}'
+                                ' yet.').format(subreddit=subreddit)
 
             receipt += ' - /r/' + subreddit
         else:
@@ -720,7 +736,8 @@ def buildStatsComment(subreddit=None, username=None):
 
             statComment += '\n\n'
 
-            statComment += 'The most frequently requested anime/manga overall are:\n\n'
+            statComment += ('The most frequently requested anime/manga '
+                            'overall are:\n\n')
 
             for i, request in enumerate(basicStats['topRequests']):
                 statComment += str(i + 1) + '. **' + str(request[0]) + '** (' + str(request[1]) + ' - ' + str(
@@ -737,13 +754,15 @@ def buildStatsComment(subreddit=None, username=None):
         print(receipt)
 
         return statComment
-    except:
+    except Exception:
         # traceback.print_exc()
         return None
 
 
-# Builds an anime comment from MAL/HB/Anilist data
 def buildVisualNovelComment(isExpanded, vndb):
+    """
+    Builds an anime comment from MAL/HB/Anilist data
+    """
     try:
         comment = ''
 
@@ -752,7 +771,7 @@ def buildVisualNovelComment(isExpanded, vndb):
             urls.append('[VNDB]({0})'.format(vndb['url']))
         if vndb['wikipedia_url']:
             if vndb['wikipedia_url'].endswith(')'):
-                formatted_wiki_url = vndb['wikipedia_url'][:-1] + '\)'
+                formatted_wiki_url = vndb['wikipedia_url'][:-1] + r'\)'
             else:
                 formatted_wiki_url = vndb['wikipedia_url']
             urls.append('[Wiki]({0})'.format(formatted_wiki_url))
@@ -765,11 +784,13 @@ def buildVisualNovelComment(isExpanded, vndb):
 
         if not isExpanded:
             template = '**{title}** - {links}\n\n^({type}{released}{length})'
-            formatted = template.format(title=vndb['title'],
-                                        links='({})'.format(formatted_links),
-                                        type='VN',
-                                        released=' | Released: ' + vndb['release_year'] if vndb['release_year'] else '',
-                                        length=' | Length: ' + vndb['length'] if vndb['length'] else '')
+            formatted = template.format(
+                title=vndb['title'],
+                links='({})'.format(formatted_links),
+                type='VN',
+                released=' | Released: ' + vndb['release_year'] if vndb['release_year'] else '',
+                length=' | Length: ' + vndb['length'] if vndb['length'] else ''
+            )
 
             comment = formatted
         else:
@@ -781,15 +802,18 @@ def buildVisualNovelComment(isExpanded, vndb):
             else:
                 formatted_stats = None
 
-            template = '**{title}** - {links}\n\n^({type}{released}{length}){stats}\n\n{desc}'
-            formatted = template.format(title=vndb['title'],
-                                        links='({})'.format(formatted_links),
-                                        type='**VN**',
-                                        released=' | **Released:** ' + vndb['release_year'] if vndb[
-                                            'release_year'] else '',
-                                        length=' | **Length:** ' + vndb['length'] if vndb['length'] else '',
-                                        stats='  \n^(' + formatted_stats if formatted_stats else '',
-                                        desc=cleanupDescription(vndb['description']))
+            template = ('**{title}** - {links}\n\n^({type}{released}{length})'
+                        '{stats}\n\n{desc}')
+            formatted = template.format(
+                title=vndb['title'],
+                links='({})'.format(formatted_links),
+                type='**VN**',
+                released=' | **Released:** ' + vndb['release_year'] if vndb[
+                    'release_year'] else '',
+                length=' | **Length:** ' + vndb['length'] if vndb['length'] else '',
+                stats='  \n^(' + formatted_stats if formatted_stats else '',
+                desc=cleanupDescription(vndb['description'])
+            )
 
             comment = formatted
 
@@ -799,12 +823,14 @@ def buildVisualNovelComment(isExpanded, vndb):
             receipt += 'VNDB'
         print(receipt)
 
-        # We return the title/comment separately so we can track if multiples of the same comment have been requests (e.g. {Nisekoi}{Nisekoi}{Nisekoi})
+        # We return the title/comment separately so we can track if multiples
+        # of the same comment have been requests
+        # (e.g. {Nisekoi}{Nisekoi}{Nisekoi})
         dictToReturn = {}
         dictToReturn['title'] = vndb['title']
         dictToReturn['comment'] = comment
 
         return dictToReturn
-    except:
+    except Exception:
         traceback.print_exc()
         return None
