@@ -46,6 +46,16 @@ from roboragi.comments import parse, Request, Tag
         [Request(tag=Tag.VISUAL_NOVEL, body='visual novel', expanded=True)],
         id='expanded visual novel'
     ),
+    pytest.param(
+        '',
+        [],
+        id='empty commment'
+    ),
+    pytest.param(
+        'I really enjoy that anime!',
+        [],
+        id='comment with no tag'
+    ),
 ])
 def test_comment_parsing(comment: str, requests: List[Request]) -> None:
     assert list(parse(comment)) == requests
