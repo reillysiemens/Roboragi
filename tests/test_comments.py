@@ -2,7 +2,7 @@ from typing import List
 
 import pytest
 
-from roboragi.comment import parse, Request, Tag
+from roboragi.comments import parse, Request, Tag
 
 
 @pytest.mark.parametrize('comment,requests', [
